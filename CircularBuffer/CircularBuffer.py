@@ -7,6 +7,7 @@ class CircBuffFlags(Enum):
     EMPTY = 0
     FULL = 1
     NONEMPTY = 2
+    WIDTH_ERROR = 3
 
 
 class WriteOverFlowMode(Enum):
@@ -33,7 +34,7 @@ class CircBuff:
 
     def __inc_write_ptr(self):
         self.write_ptr += 1
-        if self.write_ptr > self.depth:
+        if self.write_ptr >= self.depth:
             self.write_ptr = 0
 
         if self.write_ptr == self.read_ptr:
@@ -46,7 +47,7 @@ class CircBuff:
 
     def __inc_read_ptr(self):
         self.read_ptr += 1
-        if self.read_ptr > self.depth:
+        if self.read_ptr >= self.depth:
             self.read_ptr = 0
 
         if self.read_ptr == self.write_ptr:
@@ -59,11 +60,14 @@ class CircBuff:
 
         return self.buffer_state
 
+    def gey_state(self):
+        return self.buffer_state
+
     def get_occupancy(self):
         if self.buffer_state == CircBuffFlags.FULL:
             return self.depth
         else:
-            return self.write_ptr - self.read_ptr
+            return (self.write_ptr - self.read_ptr) % self.depth
 
     def flush(self):
         self.write_ptr = 0
@@ -73,7 +77,19 @@ class CircBuff:
         return CircBuffFlags.EMPTY
 
     def write_single(self, data: np.ndarray):
-        ...
+        if data.size > self.width or data.size < self.width:
+            return CircBuffFlags.WIDTH_ERROR
+
+        if self.buffer_state == CircBuffFlags.FULL and self.write_overflow_mode == WriteOverFlowMode.LIMIT:
+            return CircBuffFlags.FULL
+        else:
+            self.data[self.write_ptr, :] = data
+            return self.__inc_write_ptr()
 
     def read_single(self):
-        ...
+        if self.buffer_state == CircBuffFlags.EMPTY:
+            return CircBuffFlags.EMPTY
+        else:
+            data = self.data[self.read_ptr, :].copy()
+            self.__inc_read_ptr()
+            return data
