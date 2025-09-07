@@ -26,7 +26,8 @@ class CircBuff:
         CircBuff.instance_count += 1
         self.width = width
         self.depth = depth
-        self.data = np.zeros((self.depth, self.width), dtype=data_type)
+        self.data_type = np.dtype(data_type)
+        self.data = np.zeros((self.depth, self.width), dtype=self.data_type)
         self.read_ptr = 0
         self.write_ptr = 0
         self.write_overflow_mode = write_overflow_mode
@@ -37,7 +38,9 @@ class CircBuff:
         if self.write_ptr >= self.depth:
             self.write_ptr = 0
 
-        if self.write_ptr == self.read_ptr:
+        if self.buffer_state == CircBuffFlags.FULL:
+            self.buffer_state = CircBuffFlags.FULL
+        elif self.write_ptr == self.read_ptr:
             """If write_ptr catches up the read_ptr, buffer is full."""
             self.buffer_state = CircBuffFlags.FULL
         else:
@@ -57,10 +60,12 @@ class CircBuff:
                 self.buffer_state = CircBuffFlags.NONEMPTY
             else:
                 self.buffer_state = CircBuffFlags.EMPTY
+        else:
+            self.buffer_state = CircBuffFlags.NONEMPTY
 
         return self.buffer_state
 
-    def gey_state(self):
+    def get_state(self):
         return self.buffer_state
 
     def get_occupancy(self):
