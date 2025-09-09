@@ -146,3 +146,12 @@ class CircBuff:
                     data = self.data[self.read_ptr, :].copy()
                     self.__inc_read_ptr()
                     return data
+
+    def dump(self) -> np.ndarray:
+        ...
+
+    def write_batch(self, data: np.ndarray):
+        ...
+
+    def read_batch(self, depth: int) -> np.ndarray:
+        ...
