@@ -148,7 +148,10 @@ class CircBuff:
                     return data
 
     def dump(self) -> np.ndarray:
-        ...
+        if self.write_overflow_mode == WriteOverFlowMode.FLOW:
+            self.overflow_flag = False
+
+        return np.vstack((self.data[self.read_ptr:self.depth+1, :], self.data[0:self.read_ptr, :])).copy()
 
     def write_batch(self, data: np.ndarray):
         ...
