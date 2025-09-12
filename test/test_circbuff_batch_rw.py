@@ -97,8 +97,8 @@ def test_read_batch_wraparound(sample_data):
     # read_ptr už není na začátku, tak zapis další batch přes konec
     buf.write_batch(np.vstack(sample_data[3:6]))
     out = buf.read_batch(3)
-    # ve FLOW dostaneme kontinuálně poslední 3
-    np.testing.assert_array_equal(out, np.vstack(sample_data[3:6]))
+    # ve FLOW dostaneme 6., 4. a 5. vzorek z sample_data
+    np.testing.assert_array_equal(out, np.vstack([sample_data[5], sample_data[3], sample_data[4]]))
 
 
 # --- Kritické scénáře přetečení a wrap-around --- #
