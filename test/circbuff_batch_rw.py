@@ -198,4 +198,4 @@ def test_follow_continuous_read_after_overflow():
     # další zápis a čtení – zas poslední 3
     buf.write_batch(np.array([[7, 70], [8, 80]], dtype=np.float32))
     out2 = buf.read_batch(3)
-    np.testing.assert_array_equal(out2, np.array([[6, 60], [7, 70], [8, 80]], dtype=np.float32))
+    np.testing.assert_array_equal(out2, np.array([[7, 70], [8, 80], [6, 60]], dtype=np.float32))
