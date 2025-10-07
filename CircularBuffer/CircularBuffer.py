@@ -72,32 +72,6 @@ class CircBuff:
 
         return self.buffer_state
 
-    def __inc_read_ptr(self) -> CircBuffFlags:
-        self.read_ptr += 1
-        if self.read_ptr >= self.depth:
-            self.read_ptr = 0
-
-        match self.write_overflow_mode:
-            case WriteOverFlowMode.LIMIT:
-                if self.read_ptr == self.write_ptr:
-                    self.buffer_state = CircBuffFlags.EMPTY
-                else:
-                    self.buffer_state = CircBuffFlags.NONEMPTY
-
-            case WriteOverFlowMode.FLOW:
-                self.buffer_state = CircBuffFlags.NONEMPTY
-
-            case WriteOverFlowMode.FOLLOW:
-                if self.read_ptr == self.write_ptr:
-                    if self.buffer_state == CircBuffFlags.FULL:
-                        self.buffer_state = CircBuffFlags.NONEMPTY
-                    else:
-                        self.buffer_state = CircBuffFlags.EMPTY
-                else:
-                    self.buffer_state = CircBuffFlags.NONEMPTY
-
-        return self.buffer_state
-
     def __move_read_ptr(self, step) -> CircBuffFlags:
         # loop = False
         self.read_ptr += step
