@@ -99,11 +99,11 @@ class CircBuff:
         return self.buffer_state
 
     def __move_read_ptr(self, step) -> CircBuffFlags:
-        loop = False
+        # loop = False
         self.read_ptr += step
         if self.read_ptr >= self.depth:
             self.read_ptr %= self.depth
-            loop = True
+            # loop = True
 
         match self.write_overflow_mode:
             case WriteOverFlowMode.LIMIT:
@@ -116,13 +116,16 @@ class CircBuff:
                 self.buffer_state = CircBuffFlags.NONEMPTY
 
             case WriteOverFlowMode.FOLLOW:
-                if self.read_ptr >= self.write_ptr and loop is True:
+                # if self.read_ptr >= self.write_ptr and loop is True:
+                if self.read_ptr >= self.write_ptr:
                     if self.buffer_state == CircBuffFlags.FULL:
                         self.buffer_state = CircBuffFlags.NONEMPTY
                     else:
                         self.buffer_state = CircBuffFlags.EMPTY
                 else:
                     self.buffer_state = CircBuffFlags.NONEMPTY
+
+                self.overflow_flag = False
 
         return self.buffer_state
 
@@ -195,13 +198,9 @@ class CircBuff:
                     return np.vstack(([data]))
 
     def dump(self) -> np.ndarray:
-        read_bu = self.read_ptr
         self.overflow_flag = False
-        # self.read_ptr = 0
-        # self.write_ptr = 0
         self.buffer_state = CircBuffFlags.EMPTY
-
-        return np.vstack((self.data[read_bu:self.depth+1, :], self.data[0:read_bu, :])).copy()
+        return np.vstack((self.data[self.read_ptr:self.depth+1, :], self.data[0:self.read_ptr, :])).copy()
 
     def write_batch(self, data: np.ndarray):
         if data.shape[1] > self.width or data.shape[1] < self.width:
@@ -234,12 +233,12 @@ class CircBuff:
                 else:
                     data_tmp = data
 
-                if data_tmp.shape[0] >= self.depth - self.write_ptr:
+                if data_tmp.shape[0] > self.depth - self.write_ptr:
                     self.data[self.write_ptr:self.depth, :] = data_tmp[0:self.depth-self.write_ptr, :].copy()
-                    self.data[0:-(self.depth-self.write_ptr)] = data_tmp[self.depth-self.write_ptr-1, :].copy()
+                    self.data[0:-(self.depth-self.write_ptr)] = data_tmp[self.depth-self.write_ptr, :].copy()
 
                 else:
-                    self.data[self.write_ptr:data_tmp.shape[0], :] = data_tmp.copy()
+                    self.data[self.write_ptr:self.write_ptr+data_tmp.shape[0], :] = data_tmp.copy()
 
                 self.__move_write_ptr(data.shape[0])
                 return self.buffer_state
@@ -254,11 +253,11 @@ class CircBuff:
                 else:
                     data_tmp = data
 
-                if data_tmp.shape[0] >= self.depth - self.write_ptr:
+                if data_tmp.shape[0] > self.depth - self.write_ptr:
                     self.data[self.write_ptr:self.depth, :] = data_tmp[0:self.depth-self.write_ptr, :].copy()
-                    self.data[0:-(self.depth-self.write_ptr)] = data_tmp[self.depth-self.write_ptr-1, :].copy()
+                    self.data[0:-(self.depth-self.write_ptr)] = data_tmp[self.depth-self.write_ptr, :].copy()
                 else:
-                    self.data[self.write_ptr:data_tmp.shape[0], :] = data_tmp.copy()
+                    self.data[self.write_ptr:self.write_ptr+data_tmp.shape[0], :] = data_tmp.copy()
 
                 self.__move_write_ptr(data.shape[0])
                 return self.buffer_state
@@ -283,16 +282,13 @@ class CircBuff:
 
             case WriteOverFlowMode.FLOW:
                 if depth >= self.depth:
-                    return self.dump()
+                    return np.vstack((self.data[self.read_ptr:self.depth+1, :], self.data[0:self.read_ptr, :])).copy()
 
                 if depth > self.depth - self.read_ptr:
                     tmp_data = np.vstack((self.data[self.read_ptr:self.depth, :],
                                           self.data[0:depth-(self.depth - self.read_ptr), :]))
-                    # self.read_ptr = (self.read_ptr + depth) % self.depth
-                    # self.buffer_state = CircBuffFlags.NONEMPTY
                 else:
                     tmp_data = self.data[self.read_ptr:self.read_ptr+depth, :]
-                    # self.read_ptr += depth
 
                 self.__move_read_ptr(depth)
                 return tmp_data.copy()
@@ -304,14 +300,8 @@ class CircBuff:
                 if depth > self.depth - self.read_ptr:
                     tmp_data = np.vstack((self.data[self.read_ptr:self.depth, :],
                                           self.data[0:depth-(self.depth - self.read_ptr), :]))
-                    self.read_ptr = (self.read_ptr + depth) % self.depth
                 else:
                     tmp_data = self.data[self.read_ptr:self.read_ptr+depth, :]
-                    self.read_ptr += depth
 
-                if self.read_ptr == self.write_ptr:
-                    self.buffer_state = CircBuffFlags.EMPTY
-                else:
-                    self.buffer_state = CircBuffFlags.NONEMPTY
-
+                self.__move_read_ptr(depth)
                 return tmp_data.copy()

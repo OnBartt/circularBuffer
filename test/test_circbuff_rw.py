@@ -318,9 +318,9 @@ def test_read_flow_all(make_buffer, sample_data):
     buf.buffer_state = CircBuffFlags.NONEMPTY
     buf.read_ptr = 3
     data = buf.read_batch(4)
-    # dump should be called
-    assert buf.buffer_state == CircBuffFlags.EMPTY
-    assert buf.get_state() == CircBuffFlags.EMPTY
+    # with FLOW mode only flush empties the buffer
+    assert buf.buffer_state == CircBuffFlags.NONEMPTY
+    assert buf.get_state() == CircBuffFlags.NONEMPTY
     assert buf.read_ptr == 3
     np.testing.assert_array_equal(data, np.vstack((sample_data[3:4], sample_data[:3])))
 
@@ -389,6 +389,7 @@ def test_read_follow_wraparound(make_buffer, sample_data):
 def test_read_write_limit_basic(make_buffer, sample_data):
     buf = make_buffer(WriteOverFlowMode.LIMIT, width=2, depth=4)
     buf_state = buf.write_single(sample_data[2])
+    assert buf.get_occupancy() == 1
     data = buf.read_single()
     assert buf.write_ptr == 1
     assert buf.read_ptr == 1
@@ -423,4 +424,75 @@ def test_read_write_limit_write_over_limit(make_buffer, sample_data):
 
 
 # --- write/read with FLOW
+def test_read_write_flow_basic(make_buffer, sample_data):
+    buf = make_buffer(WriteOverFlowMode.FLOW, width=2, depth=4)
+    buf_state = buf.write_single(sample_data[2])
+    assert buf.get_occupancy() == 1
+    data = buf.read_single()
+    assert buf.write_ptr == 1
+    assert buf.read_ptr == 1
+    assert buf_state == CircBuffFlags.NONEMPTY
+    assert buf.get_state() == CircBuffFlags.NONEMPTY
+    assert buf.get_occupancy() == 0
+    np.testing.assert_array_equal(data, [sample_data[2]])
+    buf_state = buf.write_batch(np.vstack(sample_data[:4]))
+    assert buf.get_occupancy() == 0
+    data = buf.read_batch(4)
+    assert buf_state == CircBuffFlags.NONEMPTY
+    assert buf.write_ptr == 1
+    assert buf.read_ptr == 1
+    assert buf.get_state() == CircBuffFlags.NONEMPTY
+    np.testing.assert_array_equal(data, np.vstack((sample_data[:4])))
+
+
+def test_read_write_flow_overlap(make_buffer, sample_data):
+    buf = make_buffer(WriteOverFlowMode.FLOW, width=2, depth=4)
+    buf_state = buf.write_batch(np.vstack(sample_data[:6]))
+    assert buf_state == CircBuffFlags.NONEMPTY
+    assert buf.is_overflow() is True
+    assert buf.write_ptr == 2
+    assert buf.read_ptr == 0
+    data = buf.read_batch(4)
+    np.testing.assert_array_equal(data, np.vstack((sample_data[4:6], sample_data[2:4])))
+
+
 # --- write/read with FOLLOW
+def test_read_write_follow_basic(make_buffer, sample_data):
+    buf = make_buffer(WriteOverFlowMode.FOLLOW, width=2, depth=4)
+    buf_state = buf.write_batch(np.vstack((sample_data[:2])))
+    assert buf_state == CircBuffFlags.NONEMPTY
+    assert buf.write_ptr == 2
+    buf_state = buf.write_batch(np.vstack((sample_data[:2])))
+    assert buf_state == CircBuffFlags.FULL
+    assert buf.is_overflow() is True
+    assert buf.read_ptr == buf.write_ptr
+    assert buf.write_ptr == 0
+    data = buf.read_batch(4)
+    assert buf.get_state() == CircBuffFlags.EMPTY
+    np.testing.assert_array_equal(data, np.vstack((sample_data[0:2], sample_data[0:2])))
+
+
+def test_read_write_follow_following(make_buffer, sample_data):
+    buf = make_buffer(WriteOverFlowMode.FOLLOW, width=2, depth=4)
+    buf_state = buf.write_batch(np.vstack((sample_data[:5])))
+    assert buf_state == CircBuffFlags.FULL
+    assert buf.is_overflow() is True
+    assert buf.write_ptr == 1
+    assert buf.read_ptr == buf.write_ptr
+    data = buf.read_batch(3)
+    assert buf.get_state() == CircBuffFlags.NONEMPTY
+    np.testing.assert_array_equal(data, np.vstack((sample_data[1:4])))
+    assert buf.is_overflow() is False
+
+
+def test_read_write_follow_following_full(make_buffer, sample_data):
+    buf = make_buffer(WriteOverFlowMode.FOLLOW, width=2, depth=4)
+    buf_state = buf.write_batch(np.vstack((sample_data[:6])))
+    assert buf_state == CircBuffFlags.FULL
+    assert buf.is_overflow() is True
+    assert buf.write_ptr == 2
+    assert buf.read_ptr == buf.write_ptr
+    data = buf.read_batch(4)
+    assert buf.get_state() == CircBuffFlags.EMPTY
+    np.testing.assert_array_equal(data, np.vstack((sample_data[2:6])))
+    assert buf.is_overflow() is False
