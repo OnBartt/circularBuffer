@@ -37,7 +37,6 @@ class CircBuff:
         if self.write_ptr >= self.depth:
             if self.write_overflow_mode is WriteOverFlowMode.LIMIT and self.get_occupancy() + step > self.depth:
                 self.write_ptr = 0
-
             else:
                 self.write_ptr %= self.depth
 
@@ -73,11 +72,9 @@ class CircBuff:
         return self.buffer_state
 
     def __move_read_ptr(self, step) -> CircBuffFlags:
-        # loop = False
         self.read_ptr += step
         if self.read_ptr >= self.depth:
             self.read_ptr %= self.depth
-            # loop = True
 
         match self.write_overflow_mode:
             case WriteOverFlowMode.LIMIT:
@@ -90,7 +87,6 @@ class CircBuff:
                 self.buffer_state = CircBuffFlags.NONEMPTY
 
             case WriteOverFlowMode.FOLLOW:
-                # if self.read_ptr >= self.write_ptr and loop is True:
                 if self.read_ptr >= self.write_ptr:
                     if self.buffer_state == CircBuffFlags.FULL:
                         self.buffer_state = CircBuffFlags.NONEMPTY
@@ -142,7 +138,6 @@ class CircBuff:
             case WriteOverFlowMode.FOLLOW:
                 if self.buffer_state == CircBuffFlags.FULL:
                     self.data[self.write_ptr, :] = data
-                    # self.__inc_read_ptr()
                     return self.__move_write_ptr(1)
                 else:
                     self.data[self.write_ptr, :] = data
@@ -155,12 +150,12 @@ class CircBuff:
                     return CircBuffFlags.EMPTY
                 else:
                     data = self.data[self.read_ptr, :].copy()
-                    self.__inc_read_ptr()
+                    self.__move_read_ptr(1)
                     return np.vstack(([data]))
 
             case WriteOverFlowMode.FLOW:
                 data = self.data[self.read_ptr, :].copy()
-                self.__inc_read_ptr()
+                self.__move_read_ptr(1)
                 return np.vstack(([data]))
 
             case WriteOverFlowMode.FOLLOW:
@@ -168,7 +163,7 @@ class CircBuff:
                     return CircBuffFlags.EMPTY
                 else:
                     data = self.data[self.read_ptr, :].copy()
-                    self.__inc_read_ptr()
+                    self.__move_read_ptr(1)
                     return np.vstack(([data]))
 
     def dump(self) -> np.ndarray:
