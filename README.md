@@ -184,3 +184,9 @@ every starting state and every batch size, `write_batch(n)` must leave the buffe
 the state that `n` separate `write_single` calls would. That single test found bugs that the
 hand-written cases had missed for all three modes — batch and single-item paths drifting
 apart is precisely the kind of thing that is hard to aim at by hand.
+
+## AI assistance
+
+Parts of this project were developed with an AI assistant (Claude): bug fixes to the
+state tracking, the test suite, code comments and this documentation. The buffer's
+design and its three overflow modes are the author's own work.
