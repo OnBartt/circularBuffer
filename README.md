@@ -6,6 +6,10 @@ when a write runs out of space.
 The buffer stores rows of a fixed `width` in an array of `depth` slots. Nothing is ever
 shifted in memory — a read pointer and a write pointer move forward and wrap around.
 
+It started as a personal programming exercise rather than as a library, which is worth
+knowing before depending on it: see [When this is worth using](#when-this-is-worth-using)
+for where it earns its keep and where the standard library does the job better.
+
 ```python
 import numpy as np
 from CircularBuffer import CircBuff, CircBuffEmpty, WriteOverFlowMode
@@ -28,6 +32,35 @@ Python 3.13+, numpy. The project is managed with [uv](https://docs.astral.sh/uv/
 uv sync          # create .venv and install dependencies
 uv run pytest    # run the test suite
 ```
+
+## When this is worth using
+
+For a plain queue of Python objects, `collections.deque(maxlen=n)` is the right answer: it
+is in the standard library, it is battle-tested, and it gives you FOLLOW semantics for free.
+This buffer earns its place only when the data is **fixed-width numeric rows** that you want
+to keep in one contiguous numpy array.
+
+The trade-off is where the copying happens. `deque` stores references and copies nothing on
+append, so single appends are cheap — but turning its contents into an array costs a full
+conversion. This buffer writes into its array up front, so bulk writes and array-shaped
+reads are cheap, while item-at-a-time writes carry per-call overhead.
+
+Measured on depth 4096, width 8, 20 000 rows (int32):
+
+| operation | this buffer | `deque(maxlen=…)` |
+|---|---|---|
+| writing row by row | 14.6 ms | **0.7 ms** |
+| writing in batches of 256 | **0.1 ms** | 1.6 ms |
+| reading the whole content as a `(depth, width)` array | **3.6 ms** | 69.4 ms |
+
+So it fits when you are buffering sampled or vector data — signal frames, sensor readings,
+telemetry records — that arrives in chunks and is consumed as arrays: a sliding window over
+a sampled signal, a pre-trigger recorder that keeps the last N frames before an event, or a
+producer that hands whole blocks to numpy or a plotting routine. Reach for `deque` instead
+when items arrive one at a time, are not numeric, or never need to be an array.
+
+Note that this buffer is **not thread-safe**. The usual producer/consumer setup needs
+external locking.
 
 ## The three overflow modes
 
