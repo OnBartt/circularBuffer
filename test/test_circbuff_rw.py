@@ -3,10 +3,10 @@ import numpy as np
 import sys
 import os
 
-# CZ: přidej kořenový adresář projektu do sys.path
+# add the project root to sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from CircularBuffer.CircularBuffer import CircBuff, CircBuffFlags, WriteOverFlowMode  # noqa: E402
+from CircularBuffer import CircBuff, CircBuffEmpty, CircBuffFlags, WriteOverFlowMode  # noqa: E402
 
 
 # --- Fixtures ---
@@ -71,9 +71,13 @@ def test_flush_and_reuse(make_buffer, sample_data):
 @pytest.mark.parametrize("mode", [WriteOverFlowMode.LIMIT, WriteOverFlowMode.FLOW, WriteOverFlowMode.FOLLOW])
 def test_write_width_error(make_buffer, sample_data, mode):
     buf = make_buffer(mode, width=1, depth=4)
-    state = buf.write_single(sample_data[0])
-    # pokus o zápis dat s šířkou dvě, musí vrátit WIDTH_ERROR
-    assert state == CircBuffFlags.WIDTH_ERROR
+    # writing width-two data into a width-one buffer.
+    # match= matters: without the width check numpy would raise a ValueError of its own
+    # about the mismatched shape and the test would pass without verifying anything.
+    with pytest.raises(ValueError, match="expects"):
+        buf.write_single(sample_data[0])
+    with pytest.raises(ValueError, match="expects"):
+        buf.write_batch(np.vstack(sample_data[:2]))
 
 
 # --- write with LIMIT mode ---
@@ -125,7 +129,7 @@ def test_write_limit_overflow(make_buffer, sample_data):
     assert buf.overflow_flag is False
     assert buf.get_occupancy() == 4
     assert buf.write_ptr == 0
-    # CZ: zpíšou se pouze první 4 prvky
+    # only the first 4 items get written
     np.testing.assert_array_equal(buf.data[:4], np.vstack(sample_data[:4]))
 
 
@@ -538,3 +542,178 @@ def test_read_write_follow_following_full(make_buffer, sample_data):
     assert buf.get_state() == CircBuffFlags.EMPTY
     np.testing.assert_array_equal(data, np.vstack((sample_data[2:6])))
     assert buf.is_overflow() is False
+
+
+# --- regression tests ---
+@pytest.mark.parametrize("mode", [WriteOverFlowMode.FLOW, WriteOverFlowMode.FOLLOW])
+def test_write_batch_partial_wrap(make_buffer, sample_data, mode):
+    """A batch wrapping past the end of the array must continue at the start in full, not as one repeated row."""
+    buf = make_buffer(mode, width=2, depth=4)
+    buf.write_batch(np.vstack((sample_data[:2])))
+    assert buf.write_ptr == 2
+
+    buf.write_batch(np.vstack((sample_data[2:5])))
+
+    assert buf.write_ptr == 1
+    np.testing.assert_array_equal(buf.data, np.vstack((sample_data[4], sample_data[1],
+                                                       sample_data[2], sample_data[3])))
+
+
+def test_read_limit_batch_wraparound(make_buffer, sample_data):
+    """A LIMIT read must also collect content split across the end of the array."""
+    buf = make_buffer(WriteOverFlowMode.LIMIT, width=2, depth=4)
+    buf.data[3] = sample_data[0]
+    buf.data[0] = sample_data[1]
+    buf.read_ptr = 3
+    buf.write_ptr = 1
+    buf.buffer_state = CircBuffFlags.NONEMPTY
+    assert buf.get_occupancy() == 2
+
+    data = buf.read_batch(3)
+
+    np.testing.assert_array_equal(data, np.vstack((sample_data[:2])))
+    assert buf.read_ptr == 1
+    assert buf.get_state() == CircBuffFlags.EMPTY
+
+
+def test_read_limit_full_buffer_readable(make_buffer, sample_data):
+    """All items must be readable from a full buffer, not just the first (rd == wr also means FULL)."""
+    buf = make_buffer(WriteOverFlowMode.LIMIT, width=2, depth=4)
+    for item in sample_data[:4]:
+        buf.write_single(item)
+    assert buf.get_state() == CircBuffFlags.FULL
+    assert buf.read_ptr == buf.write_ptr
+
+    for i in range(4):
+        data = buf.read_single()
+        np.testing.assert_array_equal(data, np.vstack(([sample_data[i]])))
+
+    assert buf.get_state() == CircBuffFlags.EMPTY
+    with pytest.raises(CircBuffEmpty):
+        buf.read_single()
+
+
+@pytest.mark.parametrize("kw", [{"width": 0}, {"depth": 0}, {"width": -1}, {"depth": -1}])
+def test_init_rejects_invalid_dimensions(kw):
+    with pytest.raises(ValueError):
+        CircBuff(**{"width": 2, "depth": 4, "data_type": np.int32,
+                    "write_overflow_mode": WriteOverFlowMode.LIMIT, **kw})
+
+
+def test_invalid_mode_raises(make_buffer):
+    buf = make_buffer(WriteOverFlowMode.LIMIT, width=2, depth=4)
+    buf.write_overflow_mode = "LIMIT"          # a string, not the enum
+    with pytest.raises(ValueError):
+        buf.write_single(np.array([1, 10], dtype=np.int32))
+
+
+@pytest.mark.parametrize("mode", [WriteOverFlowMode.LIMIT, WriteOverFlowMode.FLOW, WriteOverFlowMode.FOLLOW])
+def test_read_from_empty_raises(make_buffer, mode):
+    """Reading an empty buffer raises, rather than returning a flag mistakable for data."""
+    buf = make_buffer(mode, width=2, depth=4)
+    assert buf.get_state() == CircBuffFlags.EMPTY
+
+    with pytest.raises(CircBuffEmpty):
+        buf.read_single()
+    with pytest.raises(CircBuffEmpty):
+        buf.read_batch(2)
+
+
+@pytest.mark.parametrize("shift", [0, 1, 2, 3])
+def test_limit_detects_full_at_any_read_ptr(make_buffer, sample_data, shift):
+    """LIMIT must detect a full buffer even when read_ptr is not zero, and refuse further writes."""
+    buf = make_buffer(WriteOverFlowMode.LIMIT, width=2, depth=4)
+    for i in range(shift):                       # move read_ptr without changing occupancy
+        buf.write_single(sample_data[i])
+        buf.read_single()
+    assert buf.get_occupancy() == 0
+
+    for i in range(4):                           # exactly depth items -> full
+        assert buf.write_single(sample_data[i]) != CircBuffFlags.FULL or i == 3
+    assert buf.get_state() == CircBuffFlags.FULL
+    assert buf.get_occupancy() == 4
+
+    snapshot = buf.data.copy()
+    assert buf.write_single(sample_data[9]) == CircBuffFlags.FULL
+    np.testing.assert_array_equal(buf.data, snapshot)
+
+
+def test_follow_single_write_moves_read_ptr_on_overwrite(make_buffer, sample_data):
+    """In FOLLOW read_ptr must step aside on single writes too, or reads return the newest instead of the oldest."""
+    buf = make_buffer(WriteOverFlowMode.FOLLOW, width=2, depth=4)
+    for item in sample_data[:4]:                 # fill it up
+        buf.write_single(item)
+    assert buf.get_state() == CircBuffFlags.FULL
+    assert buf.read_ptr == 0
+
+    buf.write_single(sample_data[4])             # overwrite the oldest item
+    assert buf.read_ptr == 1, "read_ptr must follow write_ptr on single writes too"
+    assert buf.get_state() == CircBuffFlags.FULL
+
+    received = [buf.read_single() for _ in range(4)]
+    np.testing.assert_array_equal(np.vstack(received),
+                                  np.vstack((sample_data[1], sample_data[2],
+                                             sample_data[3], sample_data[4])))
+
+
+def test_follow_single_matches_batch(make_buffer, sample_data):
+    """Writing one by one and in a batch must end in the same state."""
+    one_by_one = make_buffer(WriteOverFlowMode.FOLLOW, width=2, depth=4)
+    for item in sample_data[:6]:
+        one_by_one.write_single(item)
+
+    batched = make_buffer(WriteOverFlowMode.FOLLOW, width=2, depth=4)
+    batched.write_batch(np.vstack(sample_data[:6]))
+
+    assert (one_by_one.read_ptr, one_by_one.write_ptr) == (batched.read_ptr, batched.write_ptr)
+    assert one_by_one.get_state() == batched.get_state()
+    np.testing.assert_array_equal(one_by_one.data, batched.data)
+
+
+# --- model-based test: batch write against repeated single writes ---
+def _buffer_in_state(make_buffer, mode, depth, writes, reads):
+    """Bring the buffer into the given state using individual operations."""
+    buf = make_buffer(mode, width=1, depth=depth)
+    for i in range(writes):
+        buf.write_single(np.array([100 + i], dtype=np.int32))
+    for _ in range(reads):
+        try:
+            buf.read_single()
+        except CircBuffEmpty:
+            pass
+    return buf
+
+
+@pytest.mark.parametrize("mode", list(WriteOverFlowMode))
+@pytest.mark.parametrize("depth", [2, 3, 4, 5, 6, 7, 8])
+def test_write_batch_matches_repeated_write_single(make_buffer, mode, depth):
+    """write_batch(n) must end in the same state as n x write_single.
+
+    Walks every combination of starting buffer state and batch size, including batches
+    longer than the buffer. This kind of comparison is what exposed the bugs at the array
+    boundary, which hand-written cases are hard to aim at.
+    """
+    for writes in range(depth + 1):
+        for reads in range(depth + 1):
+            for n in range(1, 2 * depth + 1):
+                batch = np.arange(1, n + 1, dtype=np.int32).reshape(-1, 1)
+
+                batched = _buffer_in_state(make_buffer, mode, depth, writes, reads)
+                one_by_one = _buffer_in_state(make_buffer, mode, depth, writes, reads)
+
+                batched_state = batched.write_batch(batch)
+                single_state = None
+                for row in batch:
+                    single_state = one_by_one.write_single(row)
+
+                context = (
+                    f"\nmode={mode.name} depth={depth} writes={writes} reads={reads} batch={n}"
+                    f"\n  batched   : rd={batched.read_ptr} wr={batched.write_ptr} "
+                    f"data={batched.data.ravel()} state={batched_state} overflow={batched.is_overflow()}"
+                    f"\n  one by one: rd={one_by_one.read_ptr} wr={one_by_one.write_ptr} "
+                    f"data={one_by_one.data.ravel()} state={single_state} overflow={one_by_one.is_overflow()}"
+                )
+                assert (batched.read_ptr, batched.write_ptr) == (one_by_one.read_ptr, one_by_one.write_ptr), context
+                assert batched_state == single_state, context
+                assert batched.is_overflow() == one_by_one.is_overflow(), context
+                np.testing.assert_array_equal(batched.data, one_by_one.data, err_msg=context)
