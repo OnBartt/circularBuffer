@@ -45,13 +45,31 @@ append, so single appends are cheap — but turning its contents into an array c
 conversion. This buffer writes into its array up front, so bulk writes and array-shaped
 reads are cheap, while item-at-a-time writes carry per-call overhead.
 
-Measured on depth 4096, width 8, 20 000 rows (int32):
+Measured on depth 4096, width 8, 20 000 rows (int32), on this machine:
+
+| | |
+|---|---|
+| Host CPU | AMD Ryzen 5 PRO 5650G (Zen 3) |
+| Virtualisation | QEMU/KVM on Proxmox VE, CPU type `x86-64-v3`, 4 vCPU, inside a Docker container |
+| OS | Linux 6.8.0-139-generic, glibc 2.36 |
+| Python | 3.13.12 (CPython) |
+| NumPy | 2.3.2, using AVX2 and FMA3 |
+
+numpy performs best with the right instruction sets available. On a virtual platform, check
+what the guest actually sees — a generic CPU model can hide AVX2 and FMA.
 
 | operation | this buffer | `deque(maxlen=…)` |
 |---|---|---|
-| writing row by row | 14.6 ms | **0.7 ms** |
-| writing in batches of 256 | **0.1 ms** | 1.6 ms |
-| reading the whole content as a `(depth, width)` array | **3.6 ms** | 69.4 ms |
+| writing row by row | 12.7 ms | **0.5 ms** |
+| writing in batches of 256 | **0.1 ms** | 1.2 ms |
+| reading the whole content as a `(depth, width)` array | **0.8 ms** | 53.6 ms |
+
+The benchmark is in [`main.py`](main.py); `uv run main.py` reproduces it and prints the
+machine it ran on alongside the table above. Each case is run once as a warm-up and then five
+more times, and the **fastest** of those five is reported. The warm-up is there because the
+first call pays for allocation and for the CPU ramping up its clock, and the minimum is used
+instead of an average because anything slower than the fastest run is interference from the
+operating system rather than a property of the code.
 
 So it fits when you are buffering sampled or vector data — signal frames, sensor readings,
 telemetry records — that arrives in chunks and is consumed as arrays: a sliding window over

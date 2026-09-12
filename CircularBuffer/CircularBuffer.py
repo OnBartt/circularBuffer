@@ -49,7 +49,7 @@ class CircBuff:
 
     instance_count = 0
 
-    def __init__(self, width: int, depth: int, data_type: np.dtype, write_overflow_mode: WriteOverFlowMode):
+    def __init__(self, width: int, depth: int, data_type: np.typing.DTypeLike, write_overflow_mode: WriteOverFlowMode):
         self.width = width
         self.depth = depth
         self.data_type = np.dtype(data_type)
